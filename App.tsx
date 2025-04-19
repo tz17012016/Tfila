@@ -1,130 +1,105 @@
-/**
- * Sample React Native App
- * https://github.com/facebook/react-native
- *
- * @format
- */
-
-import React from 'react';
-import type {PropsWithChildren} from 'react';
+import React, {useCallback, useEffect, useState} from 'react';
 import {
-  ScrollView,
+  AppState,
+  AppStateStatus,
+  LogBox,
+  Platform,
+  Text as RNText,
+  SafeAreaView,
   StatusBar,
   StyleSheet,
-  Text,
-  useColorScheme,
-  View,
 } from 'react-native';
+import RNBootSplash from 'react-native-bootsplash';
+import {Provider} from 'react-redux';
+import {PersistGate} from 'redux-persist/integration/react';
+import DB from './src/components/DB';
+import {persistor, store} from './src/data/store/store';
+import {Connection} from './src/utilities/NetworkUtills';
+import {ThemeProvider} from './src/utilities/ThemeManager';
 
-import {
-  Colors,
-  DebugInstructions,
-  Header,
-  LearnMoreLinks,
-  ReloadInstructions,
-} from 'react-native/Libraries/NewAppScreen';
+// התעלם מאזהרות התפתחות שאינן רלוונטיות
+LogBox.ignoreLogs(['ViewPropTypes will be removed', 'AsyncStorage has been extracted']);
 
-type SectionProps = PropsWithChildren<{
-  title: string;
-}>;
+// יצירת קומפוננטת Text מותאמת ללא שינוי גודל גופן אוטומטי
+const Text = (props: React.ComponentProps<typeof RNText>) => (
+  <RNText allowFontScaling={false} {...props} />
+);
 
-function Section({children, title}: SectionProps): React.JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
-  return (
-    <View style={styles.sectionContainer}>
-      <Text
-        style={[
-          styles.sectionTitle,
-          {
-            color: isDarkMode ? Colors.white : Colors.black,
-          },
-        ]}>
-        {title}
-      </Text>
-      <Text
-        style={[
-          styles.sectionDescription,
-          {
-            color: isDarkMode ? Colors.light : Colors.dark,
-          },
-        ]}>
-        {children}
-      </Text>
-    </View>
+const App: React.FC = () => {
+  const [appReady, setAppReady] = useState<boolean>(false);
+  const [appState, setAppState] = useState<AppStateStatus>(AppState.currentState);
+
+  // עבור Android 12+ יש להתחיל את הבדיקות רק אחרי שה-splash screen הוסר
+  useEffect(() => {
+    const init = async (): Promise<void> => {
+      try {
+        // בדיקת חיבור ראשונית
+        await Connection.isOnline();
+      } catch (error) {
+        console.warn('Failed initial connection check:', error);
+      }
+
+      // לחכות מעט לטעינת האפליקציה לפני הצגה
+      setTimeout(() => {
+        setAppReady(true);
+      }, 500);
+    };
+
+    init();
+  }, []);
+
+  // הסתרת מסך טעינה כאשר האפליקציה מוכנה
+  useEffect(() => {
+    if (appReady) {
+      RNBootSplash.hide({fade: true});
+    }
+  }, [appReady]);
+
+  // ניהול מאזין למצב האפליקציה
+  const handleAppStateChange = useCallback(
+    (nextAppState: AppStateStatus): void => {
+      if (appState.match(/inactive|background/) && nextAppState === 'active') {
+        // האפליקציה חזרה לפעילות, נעדכן את מצב החיבור
+        Connection.isOnline().catch(err => console.warn('Connection check failed:', err));
+      }
+
+      setAppState(nextAppState);
+    },
+    [appState],
   );
-}
 
-function App(): React.JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
+  // הוספת מאזין למצב האפליקציה
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
 
-  const backgroundStyle = {
-    backgroundColor: isDarkMode ? Colors.darker : Colors.lighter,
-  };
-
-  /*
-   * To keep the template simple and small we're adding padding to prevent view
-   * from rendering under the System UI.
-   * For bigger apps the reccomendation is to use `react-native-safe-area-context`:
-   * https://github.com/AppAndFlow/react-native-safe-area-context
-   *
-   * You can read more about it here:
-   * https://github.com/react-native-community/discussions-and-proposals/discussions/827
-   */
-  const safePadding = '5%';
+    return () => {
+      subscription.remove();
+      // לנקות את כל המאזינים בעת סגירת האפליקציה
+      Connection.unsubscribeAll();
+    };
+  }, [handleAppStateChange]);
 
   return (
-    <View style={backgroundStyle}>
-      <StatusBar
-        barStyle={isDarkMode ? 'light-content' : 'dark-content'}
-        backgroundColor={backgroundStyle.backgroundColor}
-      />
-      <ScrollView
-        style={backgroundStyle}>
-        <View style={{paddingRight: safePadding}}>
-          <Header/>
-        </View>
-        <View
-          style={{
-            backgroundColor: isDarkMode ? Colors.black : Colors.white,
-            paddingHorizontal: safePadding,
-            paddingBottom: safePadding,
-          }}>
-          <Section title="Step One">
-            Edit <Text style={styles.highlight}>App.tsx</Text> to change this
-            screen and then come back to see your edits.
-          </Section>
-          <Section title="See Your Changes">
-            <ReloadInstructions />
-          </Section>
-          <Section title="Debug">
-            <DebugInstructions />
-          </Section>
-          <Section title="Learn More">
-            Read the docs to discover what to do next:
-          </Section>
-          <LearnMoreLinks />
-        </View>
-      </ScrollView>
-    </View>
+    <Provider store={store}>
+      <PersistGate loading={null} persistor={persistor}>
+        <ThemeProvider>
+          <SafeAreaView style={styles.safeArea}>
+            <StatusBar
+              backgroundColor="#077b80"
+              barStyle={Platform.OS === 'ios' ? 'dark-content' : 'light-content'}
+            />
+            <DB />
+          </SafeAreaView>
+        </ThemeProvider>
+      </PersistGate>
+    </Provider>
   );
-}
+};
 
 const styles = StyleSheet.create({
-  sectionContainer: {
-    marginTop: 32,
-    paddingHorizontal: 24,
-  },
-  sectionTitle: {
-    fontSize: 24,
-    fontWeight: '600',
-  },
-  sectionDescription: {
-    marginTop: 8,
-    fontSize: 18,
-    fontWeight: '400',
-  },
-  highlight: {
-    fontWeight: '700',
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#f8f9fa',
   },
 });
 
