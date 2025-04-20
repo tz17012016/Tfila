@@ -562,7 +562,6 @@ const Zmanim: React.FC<ZmanimProps> = ({displayLimit, showHeader = true}) => {
             {zmanimData?.hebrewDate && (
               <Text style={dynamicStyles.hebrewDateText}>{zmanimData.hebrewDate}</Text>
             )}
-            <Text style={dynamicStyles.methodText}>מבוסס על נתוני לוח hebcal</Text>
           </View>
 
           {zmanimData?.isShabbat && (
