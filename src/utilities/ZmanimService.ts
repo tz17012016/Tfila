@@ -40,39 +40,137 @@ export class ZmanimService {
    */
   async getZmanimData(forceRefresh = false): Promise<ZmanimData | null> {
     try {
+      console.group('⏰ בקשת זמני תפילה');
+      console.log(`מצב: ${forceRefresh ? 'מאלץ רענון מהשרת' : 'בודק מטמון תחילה'}`);
+
       // Check cache first unless forced refresh
       if (!forceRefresh) {
         const cachedData = await this.getCachedData();
         if (cachedData) {
-          console.log('Using cached Zmanim data');
+          console.log('✅ נמצא מידע במטמון תקף');
+          this.logZmanimSummary(cachedData, 'מטמון');
+          console.groupEnd();
           return cachedData;
         }
       }
 
       // Fetch from API
       const url = this.buildApiUrl();
-      console.log(`Fetching Zmanim data from: ${url}`);
+      console.log(`🔄 מתחבר ל-API בכתובת: ${url}`);
 
+      const startTime = Date.now();
       const response = await fetch(url);
+      const endTime = Date.now();
+
+      console.log(`⏱️ זמן תגובת שרת: ${endTime - startTime}ms`);
+      console.log(`קוד תשובה: ${response.status} ${response.statusText}`);
+
       if (!response.ok) {
         throw new Error(`Hebcal Zmanim API error: ${response.status}`);
       }
 
       const data = await response.json();
+      console.log(`📦 נתונים התקבלו בהצלחה מהשרת`);
 
       // Format the response data into our ZmanimData structure
       const zmanimData = this.formatZmanimData(data);
 
+      // Log summary of zmanim received
+      this.logZmanimSummary(zmanimData, 'שרת');
+
       // Cache the data
       await this.cacheData(zmanimData);
 
+      console.groupEnd();
       return zmanimData;
     } catch (error) {
-      console.error('Error fetching Zmanim data:', error);
+      console.error('❌ שגיאה בקבלת זמני תפילה:', error);
+
       // Try to return cached data even if expired as fallback
       const cachedData = await this.getCachedData(true);
+      if (cachedData) {
+        console.log('⚠️ משתמש בנתונים מהמטמון כגיבוי לאחר שגיאה');
+        this.logZmanimSummary(cachedData, 'מטמון (גיבוי)');
+      } else {
+        console.log('❌ אין נתונים זמינים במטמון לגיבוי');
+      }
+
+      console.groupEnd();
       return cachedData;
     }
+  }
+
+  /**
+   * Log summary of zmanim data
+   * @param data - The zmanim data to summarize
+   * @param source - Source of the data (cache or API)
+   */
+  private logZmanimSummary(data: ZmanimData, source: string): void {
+    if (!data || !data.items) {
+      console.log(`❌ אין נתוני זמני תפילה תקפים מ${source}`);
+      return;
+    }
+
+    console.group(`📊 סיכום זמני תפילה (מקור: ${source})`);
+
+    // Log basic info
+    console.log(`תאריך: ${data.date}`);
+    console.log(`תאריך עברי: ${data.hebrewDate}`);
+    console.log(
+      `מיקום: ${data.location.name} (${data.location.latitude}, ${data.location.longitude})`,
+    );
+    console.log(`אזור זמן: ${data.location.tzid}`);
+
+    // Count zmanim by category
+    const totalZmanim = data.items.length;
+    console.log(`סך הכל זמנים: ${totalZmanim}`);
+
+    // Group zmanim by part of day
+    const morning: ZmanimItem[] = [];
+    const midday: ZmanimItem[] = [];
+    const evening: ZmanimItem[] = [];
+
+    data.items.forEach(item => {
+      const timeDate = new Date(item.time);
+      const hours = timeDate.getHours();
+
+      if (hours < 12) {
+        morning.push(item);
+      } else if (hours < 17) {
+        midday.push(item);
+      } else {
+        evening.push(item);
+      }
+    });
+
+    // Log key zmanim in order of the day
+    console.log('\n⛅ זמני בוקר:');
+    morning.forEach(item => {
+      console.log(`  - ${item.title}: ${item.timeString}`);
+    });
+
+    console.log('\n☀️ זמני צהריים:');
+    midday.forEach(item => {
+      console.log(`  - ${item.title}: ${item.timeString}`);
+    });
+
+    console.log('\n🌙 זמני ערב:');
+    evening.forEach(item => {
+      console.log(`  - ${item.title}: ${item.timeString}`);
+    });
+
+    // Find special zmanim
+    const specialZmanim = ['הדלקת נרות', 'צאת השבת', 'צאת הכוכבים'];
+    const foundSpecial = data.items.filter(item => specialZmanim.some(z => item.title.includes(z)));
+
+    if (foundSpecial.length > 0) {
+      console.log('\n✨ זמנים מיוחדים:');
+      foundSpecial.forEach(item => {
+        console.log(`  - ${item.title}: ${item.timeString}`);
+      });
+    }
+
+    console.groupEnd();
   }
 
   /**
@@ -127,6 +225,9 @@ export class ZmanimService {
         sunriseElevation: 'הנץ (התאמת גובה)',
       };
 
+      // Log all original zmanim keys for debugging
+      console.log('מפתחות זמנים מקוריים מה-API:', Object.keys(data.times));
+
       // Process each time entry
       Object.entries(data.times).forEach(([key, value]) => {
         if (typeof value === 'string') {
@@ -164,11 +265,14 @@ export class ZmanimService {
    */
   async clearCache(): Promise<void> {
     try {
+      console.group('🗑️ ניקוי מטמון זמני תפילה');
       await AsyncStorage.removeItem(ZMANIM_CACHE_KEY);
       await AsyncStorage.removeItem(ZMANIM_CACHE_DATE_KEY);
-      console.log('Zmanim cache cleared');
+      console.log('✅ מטמון זמני תפילה נוקה בהצלחה');
+      console.groupEnd();
     } catch (error) {
-      console.error('Failed to clear Zmanim cache:', error);
+      console.error('❌ שגיאה בניקוי מטמון זמני תפילה:', error);
+      console.groupEnd();
     }
   }
 
@@ -197,9 +301,9 @@ export class ZmanimService {
     try {
       await AsyncStorage.setItem(ZMANIM_CACHE_KEY, JSON.stringify(data));
       await AsyncStorage.setItem(ZMANIM_CACHE_DATE_KEY, new Date().toISOString());
-      console.log('Zmanim data cached successfully');
+      console.log('✅ נתוני זמני תפילה נשמרו במטמון בהצלחה');
     } catch (error) {
-      console.error('Failed to cache Zmanim data:', error);
+      console.error('❌ שגיאה בשמירת נתוני זמני תפילה במטמון:', error);
     }
   }
 
@@ -215,6 +319,7 @@ export class ZmanimService {
       const cacheDateStr = await AsyncStorage.getItem(ZMANIM_CACHE_DATE_KEY);
 
       if (!cachedDataStr || !cacheDateStr) {
+        console.log('לא נמצא מטמון זמני תפילה');
         return null;
       }
 
@@ -224,20 +329,80 @@ export class ZmanimService {
         const now = new Date();
         const diffMs = now.getTime() - cacheDate.getTime();
         const diffHours = diffMs / (1000 * 60 * 60);
+        const diffMinutes = Math.floor((diffHours - Math.floor(diffHours)) * 60);
+
+        console.log(
+          `מטמון זמני תפילה נוצר לפני: ${Math.floor(diffHours)} שעות ו-${diffMinutes} דקות`,
+        );
+        console.log(`תוקף מטמון: ${CACHE_EXPIRY_HOURS} שעות`);
 
         if (diffHours > CACHE_EXPIRY_HOURS) {
-          console.log('Zmanim cache expired');
+          console.log('⚠️ מטמון זמני תפילה פג תוקף');
           return null;
         }
       }
 
-      // Parse the cached data - no need to convert strings back to Date objects
-      // as we'll use the timeString for display and parse the time string when needed
+      // Parse the cached data
       return JSON.parse(cachedDataStr);
     } catch (error) {
-      console.error('Error retrieving Zmanim cached data:', error);
+      console.error('❌ שגיאה באחזור נתוני זמני תפילה מהמטמון:', error);
       return null;
     }
+  }
+
+  /**
+   * Get zmanim for a specific date
+   * @param date - Date to get zmanim for
+   * @returns Promise with zmanim data for the specified date
+   */
+  async getZmanimForDate(date: Date): Promise<ZmanimData | null> {
+    const dateString = date.toISOString().split('T')[0]; // YYYY-MM-DD format
+    console.group(`⏰ בקשת זמני תפילה לתאריך ${dateString}`);
+
+    try {
+      const url = this.buildApiUrlForDate(date);
+      console.log(`🔄 מתחבר ל-API בכתובת: ${url}`);
+
+      const startTime = Date.now();
+      const response = await fetch(url);
+      const endTime = Date.now();
+
+      console.log(`⏱️ זמן תגובת שרת: ${endTime - startTime}ms`);
+
+      if (!response.ok) {
+        throw new Error(`Hebcal Zmanim API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const zmanimData = this.formatZmanimData(data);
+
+      // Log summary of zmanim received
+      this.logZmanimSummary(zmanimData, 'שרת (תאריך ספציפי)');
+
+      console.groupEnd();
+      return zmanimData;
+    } catch (error) {
+      console.error(`❌ שגיאה בקבלת זמני תפילה לתאריך ${dateString}:`, error);
+      console.groupEnd();
+      return null;
+    }
+  }
+
+  /**
+   * Build API URL for a specific date
+   * @param date - Date to get zmanim for
+   * @returns API URL
+   */
+  private buildApiUrlForDate(date: Date): string {
+    const dateString = date.toISOString().split('T')[0]; // YYYY-MM-DD format
+
+    const params = new URLSearchParams({
+      cfg: 'json',
+      geonameid: '293690', // Rosh Ha'Ayin, Israel
+      date: dateString,
+    });
+
+    return `${HEBCAL_ZMANIM_API_URL}?${params.toString()}`;
   }
 }
 

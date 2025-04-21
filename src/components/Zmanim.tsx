@@ -1,4 +1,4 @@
-import React, {useEffect, useMemo, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {
   ScrollView,
   StyleSheet,
@@ -8,16 +8,11 @@ import {
   View,
   ViewStyle,
 } from 'react-native';
-import {
-  useGetTodayEventsQuery,
-  useRefreshHebcalDataMutation,
-  ZmanItem,
-} from '../data/redux/api/hebcalApi';
+import {useGetTodayEventsQuery, useRefreshHebcalDataMutation} from '../data/redux/api/hebcalApi';
 import {useGetOmerDataQuery, useRefreshOmerDataMutation} from '../data/redux/api/omerApi';
 import {useGetParashaDataQuery, useRefreshParashaDataMutation} from '../data/redux/api/parashaApi';
 import {useGetZmanimDataQuery, useRefreshZmanimDataMutation} from '../data/redux/api/zmanimApi';
 import {useTheme} from '../utilities/ThemeManager';
-import {formatTimeForDisplay} from '../utilities/timeUtils';
 
 // הגדרת מאפייני Props של הרכיב
 interface ZmanimProps {
@@ -26,6 +21,9 @@ interface ZmanimProps {
 }
 
 const REFRESH_INTERVAL = 60000; // רענון כל דקה
+
+// קטגוריות הזמנים
+type TimeCategory = 'בוקר' | 'צהריים' | 'ערב';
 
 // Define a type for the dynamic styles object
 type DynamicStyles = {
@@ -68,6 +66,25 @@ type DynamicStyles = {
   omerTitle: TextStyle;
   omerText: TextStyle;
   omerFullText: TextStyle;
+  // סגנונות חדשים ללוח זמנים
+  timetableContainer: ViewStyle;
+  timetableHeader: ViewStyle;
+  timetableHeaderText: TextStyle;
+  categoryContainer: ViewStyle;
+  categoryHeader: ViewStyle;
+  categoryHeaderText: TextStyle;
+  timeItemContainer: ViewStyle;
+  dayPartIndicator: TextStyle;
+  dayPartText: TextStyle;
+  tableHeader: ViewStyle;
+  tableHeaderText: TextStyle;
+  tableRow: ViewStyle;
+  tableNameCell: ViewStyle;
+  tableTimeCell: ViewStyle;
+  tableNameText: TextStyle;
+  tableTimeText: TextStyle;
+  currentTimeIndicator: ViewStyle;
+  nearTimeContainer: ViewStyle;
 };
 
 const Zmanim: React.FC<ZmanimProps> = ({displayLimit, showHeader = true}) => {
@@ -118,101 +135,6 @@ const Zmanim: React.FC<ZmanimProps> = ({displayLimit, showHeader = true}) => {
   const isRefreshing =
     isRefreshingZmanim || isRefreshingParasha || isRefreshingDetailedZmanim || isRefreshingOmer;
   const error = zmanimError || parashaError || detailedZmanimError || omerError;
-
-  // עדכון השעה הנוכחית כל דקה
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrentTime(new Date());
-    }, REFRESH_INTERVAL);
-
-    return () => clearInterval(timer);
-  }, []);
-
-  // ביצוע רענון הנתונים ורפטש
-  const handleRefresh = async () => {
-    try {
-      // קודם נבצע רענון הנתונים בשירות (מחיקת קאש)
-      await Promise.all([
-        refreshZmanimData(),
-        refreshParashaData(),
-        refreshDetailedZmanimData(),
-        refreshOmerData(),
-      ]);
-
-      // אחרי זה נבקש מ-RTK Query לבצע fetching מחדש של הנתונים
-      await Promise.all([
-        refetchZmanim(),
-        refetchParasha(),
-        refetchDetailedZmanim(),
-        refetchOmer(),
-      ]);
-    } catch (err) {
-      console.error('Error refreshing data:', err);
-    }
-  };
-
-  // הזמן הקרוב הבא (מ-hebcalAPI)
-  const nextTime = useMemo<ZmanItem | null>(() => {
-    if (!zmanimData?.zmanim || zmanimData.zmanim.length === 0) {
-      return null;
-    }
-
-    // נקבל רק את הזמנים העתידיים (שעוד לא עברו)
-    const futureZmanim = zmanimData.zmanim.filter(z => {
-      // Convert ISO string to Date for comparison
-      return z.parsedTime && new Date(z.parsedTime) > currentTime;
-    });
-
-    // אם אין זמנים עתידיים היום, נחזיר null
-    if (futureZmanim.length === 0) {
-      return null;
-    }
-
-    // נמצא את הזמן הקרוב ביותר
-    return futureZmanim.reduce((closest, current) => {
-      // Make sure both parsed times exist before comparing
-      if (current.parsedTime && closest.parsedTime) {
-        const currentTime = new Date(current.parsedTime).getTime();
-        const closestTime = new Date(closest.parsedTime).getTime();
-        return currentTime < closestTime ? current : closest;
-      }
-      // If closest doesn't have parsedTime but current does, return current
-      if (current.parsedTime && !closest.parsedTime) {
-        return current;
-      }
-      // Default: keep closest
-      return closest;
-    }, futureZmanim[0]);
-  }, [zmanimData?.zmanim, currentTime]);
-
-  // הזמן המפורט הבא (מה-API החדש)
-  const nextDetailedTime = useMemo(() => {
-    if (!detailedZmanimData?.items || detailedZmanimData.items.length === 0) {
-      return null;
-    }
-
-    // נקבל רק את הזמנים העתידיים
-    const futureZmanim = detailedZmanimData.items.filter(z => {
-      return z.time && z.time > currentTime;
-    });
-
-    // אם אין זמנים עתידיים
-    if (futureZmanim.length === 0) {
-      return null;
-    }
-
-    // נמצא את הזמן הקרוב ביותר
-    return futureZmanim.reduce((closest, current) => {
-      return current.time.getTime() < closest.time.getTime() ? current : closest;
-    }, futureZmanim[0]);
-  }, [detailedZmanimData?.items, currentTime]);
-
-  // Define date strings
-  const dateString = currentTime.toLocaleDateString('he-IL', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  });
 
   // יצירת סגנונות דינמיים בהתאם לנושא הנוכחי
   const dynamicStyles = StyleSheet.create<DynamicStyles>({
@@ -327,15 +249,14 @@ const Zmanim: React.FC<ZmanimProps> = ({displayLimit, showHeader = true}) => {
       fontStyle: 'italic',
     },
     pastTime: {
-      opacity: 0.5,
+      opacity: 0.65,
     },
     pastTimeText: {
       color: colors.text.disabled,
     },
     nextTime: {
-      backgroundColor: colors.notification.success,
+      backgroundColor: colors.notification.success + '30',
       borderRadius: 8,
-      paddingHorizontal: 8,
     },
     highlightedText: {
       color: colors.success,
@@ -384,7 +305,6 @@ const Zmanim: React.FC<ZmanimProps> = ({displayLimit, showHeader = true}) => {
       marginVertical: 6,
     },
     refreshButton: {
-      // כפתור לרענון הנתונים
       backgroundColor: colors.primary + '20',
       paddingVertical: 6,
       paddingHorizontal: 10,
@@ -421,7 +341,6 @@ const Zmanim: React.FC<ZmanimProps> = ({displayLimit, showHeader = true}) => {
       padding: 8,
       marginBottom: 12,
     },
-    // סגנונות חדשים לספירת העומר
     omerContainer: {
       backgroundColor: colors.primary + '20',
       padding: 12,
@@ -449,6 +368,341 @@ const Zmanim: React.FC<ZmanimProps> = ({displayLimit, showHeader = true}) => {
       textAlign: 'center',
       marginTop: 4,
     },
+    // סגנונות חדשים ללוח זמנים
+    timetableContainer: {
+      backgroundColor: colors.card.background,
+      borderRadius: 8,
+      marginVertical: 8,
+      overflow: 'hidden',
+      elevation: 1,
+    },
+    timetableHeader: {
+      backgroundColor: colors.primary,
+      paddingVertical: 8,
+      paddingHorizontal: 12,
+      borderTopLeftRadius: 8,
+      borderTopRightRadius: 8,
+    },
+    timetableHeaderText: {
+      color: colors.text.inverse,
+      fontWeight: 'bold',
+      fontSize: 18,
+      textAlign: 'center',
+    },
+    categoryContainer: {
+      marginBottom: 16,
+      backgroundColor: colors.card.background,
+      borderRadius: 8,
+      overflow: 'hidden',
+      elevation: 2,
+      shadowColor: colors.shadow,
+      shadowOffset: {width: 0, height: 1},
+      shadowOpacity: 0.1,
+      shadowRadius: 2,
+    },
+    categoryHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.primary + '20',
+      paddingVertical: 10,
+      paddingHorizontal: 16,
+      borderTopLeftRadius: 8,
+      borderTopRightRadius: 8,
+    },
+    categoryHeaderText: {
+      fontSize: 17,
+      fontWeight: 'bold',
+      color: colors.primary,
+      textAlign: 'center',
+      flex: 1,
+    },
+    timeItemContainer: {
+      paddingVertical: 10,
+      paddingHorizontal: 16,
+      borderBottomWidth: 0.5,
+      borderBottomColor: colors.divider,
+    },
+    dayPartIndicator: {
+      fontSize: 20,
+      marginRight: 10,
+    },
+    dayPartText: {
+      fontSize: 16,
+      color: colors.text.primary,
+      fontWeight: 'bold',
+    },
+    tableHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      paddingVertical: 8,
+      paddingHorizontal: 16,
+      backgroundColor: colors.surface,
+      borderBottomWidth: 0.5,
+      borderBottomColor: colors.divider,
+    },
+    tableHeaderText: {
+      fontSize: 15,
+      fontWeight: 'bold',
+      color: colors.text.secondary,
+    },
+    tableRow: {
+      flexDirection: 'row',
+      paddingVertical: 10,
+      paddingHorizontal: 16,
+      borderBottomWidth: 0.5,
+      borderBottomColor: colors.divider,
+    },
+    tableNameCell: {
+      flex: 1,
+      justifyContent: 'center',
+    },
+    tableTimeCell: {
+      width: 80,
+      alignItems: 'flex-start',
+      justifyContent: 'center',
+      position: 'relative',
+    },
+    tableNameText: {
+      fontSize: 16,
+      color: colors.text.primary,
+      textAlign: 'right',
+    },
+    tableTimeText: {
+      fontSize: 16,
+      fontWeight: 'bold',
+      color: colors.primary,
+    },
+    currentTimeIndicator: {
+      position: 'absolute',
+      right: -12,
+      top: '50%',
+      width: 10,
+      height: 10,
+      borderRadius: 5,
+      backgroundColor: colors.success,
+      marginTop: -5,
+    },
+    nearTimeContainer: {
+      backgroundColor: colors.notification.info + '20',
+      padding: 12,
+      borderRadius: 8,
+      marginBottom: 10,
+    },
+  });
+
+  // עדכון השעה הנוכחית כל דקה
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(new Date());
+    }, REFRESH_INTERVAL);
+
+    return () => clearInterval(timer);
+  }, []);
+
+  // הצגת נתונים שהתקבלו במסוף
+  useEffect(() => {
+    if (zmanimData) {
+      console.log('📅 נתוני זמנים התקבלו:', {
+        hebrewDate: zmanimData.hebrewDate,
+        zmanItems: zmanimData.zmanim.length,
+        isShabbat: zmanimData.isShabbat ? 'כן' : 'לא',
+        parasha: zmanimData.parasha || 'אין',
+      });
+    }
+
+    if (detailedZmanimData) {
+      console.log('⏰ נתוני זמנים מפורטים התקבלו:', {
+        count: detailedZmanimData.items?.length || 0,
+        sunrise:
+          detailedZmanimData.items?.find(z => z.title === 'עלות השחר')?.timeString || 'לא זמין',
+        sunset:
+          detailedZmanimData.items?.find(z => z.title === 'שקיעת החמה')?.timeString || 'לא זמין',
+      });
+    }
+
+    if (parashaData) {
+      console.log('📖 נתוני פרשת השבוע התקבלו:', {
+        name: parashaData.hebrew.parashaName || parashaData.parashaName,
+        date: parashaData.date,
+      });
+    }
+
+    if (omerData) {
+      console.log('🌾 נתוני ספירת העומר התקבלו:', {
+        count: omerData.todayOmer?.hebrew?.substring(0, 30),
+        isOmer: omerData.isOmerPeriod ? 'כן' : 'לא',
+        text: omerData.todayOmer?.hebrew?.substring(0, 30),
+      });
+    }
+  }, [zmanimData, detailedZmanimData, parashaData, omerData]);
+
+  // הוספת פונקציית עזר להמרה בטוחה של אובייקטים למחרוזות
+  const safeStringify = (value: any): string => {
+    if (value === null || value === undefined) {
+      return '';
+    }
+    if (typeof value === 'object') {
+      try {
+        return JSON.stringify(value);
+      } catch (e) {
+        return String(value);
+      }
+    }
+    return String(value);
+  };
+
+  // ביצוע רענון הנתונים ורפטש
+  const handleRefresh = async () => {
+    try {
+      console.log('🔄 מתחיל רענון נתוני זמנים...');
+      // קודם נבצע רענון הנתונים בשירות (מחיקת קאש)
+      await Promise.all([
+        refreshZmanimData(),
+        refreshParashaData(),
+        refreshDetailedZmanimData(),
+        refreshOmerData(),
+      ]);
+
+      // אחרי זה נבקש מ-RTK Query לבצע fetching מחדש של הנתונים
+      await Promise.all([
+        refetchZmanim(),
+        refetchParasha(),
+        refetchDetailedZmanim(),
+        refetchOmer(),
+      ]);
+      console.log('✅ רענון נתוני זמנים הושלם בהצלחה');
+    } catch (err) {
+      console.error('❌ שגיאה ברענון נתוני זמנים:', safeStringify(err));
+    }
+  };
+
+  // הזמן המפורט הבא (מה-API החדש)
+  const nextDetailedTime = useMemo(() => {
+    if (!detailedZmanimData?.items || detailedZmanimData.items.length === 0) {
+      return null;
+    }
+
+    // נקבל רק את הזמנים העתידיים
+    const futureZmanim = detailedZmanimData.items.filter(z => {
+      return z.time && new Date(z.time) > currentTime;
+    });
+
+    // אם אין זמנים עתידיים
+    if (futureZmanim.length === 0) {
+      return null;
+    }
+
+    // נמצא את הזמן הקרוב ביותר
+    return futureZmanim.reduce((closest, current) => {
+      const currentItemTime = new Date(current.time).getTime();
+      const closestTime = new Date(closest.time).getTime();
+      return currentItemTime < closestTime ? current : closest;
+    }, futureZmanim[0]);
+  }, [detailedZmanimData?.items, currentTime]);
+
+  // חלוקת זמנים לקטגוריות - חדש
+  const categorizedTimes = useMemo(() => {
+    if (!detailedZmanimData?.items || detailedZmanimData.items.length === 0) {
+      return {
+        morning: [],
+        noon: [],
+        evening: [],
+      };
+    }
+
+    return detailedZmanimData.items.reduce(
+      (acc, item) => {
+        try {
+          if (!item.time) {
+            return acc;
+          }
+
+          const timeDate = new Date(item.time);
+          const hours = timeDate.getHours();
+
+          if (hours < 12) {
+            acc.morning.push(item);
+          } else if (hours < 17) {
+            acc.noon.push(item);
+          } else {
+            acc.evening.push(item);
+          }
+        } catch (e) {
+          console.error('שגיאה במיון זמנים:', e);
+        }
+        return acc;
+      },
+      {morning: [], noon: [], evening: []} as Record<string, any[]>,
+    );
+  }, [detailedZmanimData?.items]);
+
+  // פונקציה להצגת קטגוריית זמנים
+  const renderTimeCategory = useCallback(
+    (title: TimeCategory, items: any[], icon: string) => {
+      if (!items || items.length === 0) {
+        return null;
+      }
+
+      return (
+        <View style={dynamicStyles.categoryContainer}>
+          <View style={dynamicStyles.categoryHeader}>
+            <Text style={dynamicStyles.dayPartIndicator}>{icon}</Text>
+            <Text style={dynamicStyles.categoryHeaderText}>{title}</Text>
+          </View>
+
+          <View style={dynamicStyles.tableHeader}>
+            <Text style={[dynamicStyles.tableHeaderText, {flex: 1, textAlign: 'right'}]}>זמן</Text>
+            <Text style={[dynamicStyles.tableHeaderText, {width: 80, textAlign: 'left'}]}>שעה</Text>
+          </View>
+
+          {items.map((item, index) => {
+            const itemTime = new Date(item.time);
+            const isPast = itemTime < currentTime;
+            const isNext = nextDetailedTime?.title === item.title;
+
+            return (
+              <View
+                key={index}
+                style={[
+                  dynamicStyles.tableRow,
+                  isPast && dynamicStyles.pastTime,
+                  isNext && dynamicStyles.nextTime,
+                ]}>
+                <View style={dynamicStyles.tableNameCell}>
+                  <Text
+                    style={[
+                      dynamicStyles.tableNameText,
+                      isPast && dynamicStyles.pastTimeText,
+                      isNext && dynamicStyles.highlightedText,
+                    ]}>
+                    {item.title}
+                  </Text>
+                </View>
+                <View style={dynamicStyles.tableTimeCell}>
+                  <Text
+                    style={[
+                      dynamicStyles.tableTimeText,
+                      isPast && dynamicStyles.pastTimeText,
+                      isNext && dynamicStyles.highlightedText,
+                    ]}>
+                    {item.timeString}
+                  </Text>
+                  {isNext && <View style={dynamicStyles.currentTimeIndicator} />}
+                </View>
+              </View>
+            );
+          })}
+        </View>
+      );
+    },
+    [currentTime, nextDetailedTime, dynamicStyles],
+  );
+
+  // Define date strings
+  const dateString = currentTime.toLocaleDateString('he-IL', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
   });
 
   // אם אין נתונים להצגה או שעדיין טוענים
@@ -531,18 +785,6 @@ const Zmanim: React.FC<ZmanimProps> = ({displayLimit, showHeader = true}) => {
     );
   }
 
-  // אם יש מגבלת הצגה, קטע את הרשימה
-  const displayZmanim =
-    displayLimit && zmanimData?.zmanim
-      ? zmanimData.zmanim.slice(0, displayLimit)
-      : zmanimData?.zmanim || [];
-
-  // אם יש מגבלת הצגה, קטע את הרשימה גם עבור הזמנים המפורטים
-  const displayDetailedZmanim =
-    displayLimit && detailedZmanimData?.items
-      ? detailedZmanimData.items.slice(0, displayLimit)
-      : detailedZmanimData?.items || [];
-
   // קבץ אירועים לפי קטגוריה להצגה נוחה
   const holidayEvents =
     zmanimData?.hebrewEvents?.filter(
@@ -582,28 +824,17 @@ const Zmanim: React.FC<ZmanimProps> = ({displayLimit, showHeader = true}) => {
         </View>
       )}
 
-      {/* הצגת מידע ספירת העומר */}
-      {omerData?.todayOmer && (
-        <View style={dynamicStyles.omerContainer}>
-          <Text style={dynamicStyles.omerTitle}>ספירת העומר</Text>
-          <Text style={dynamicStyles.omerText}>{omerData.todayOmer.hebrew}</Text>
-          <Text style={dynamicStyles.omerFullText}>{omerData.todayOmer.fullOmerText}</Text>
-        </View>
-      )}
-
-      {/* הצגת מידע על העומר הבא אם אנחנו בתקופת העומר אבל אין ספירה היום */}
-      {!omerData?.todayOmer && omerData?.nextOmer && omerData?.isOmerPeriod && (
-        <View style={dynamicStyles.omerContainer}>
-          <Text style={dynamicStyles.omerTitle}>ספירת העומר</Text>
-          <Text style={dynamicStyles.omerText}>ספירת העומר הבאה:</Text>
-          <Text style={dynamicStyles.omerText}>
-            {new Date(omerData.nextOmer.date).toLocaleDateString('he-IL')}
+      {/* הצגת הזמן הבא הקרוב */}
+      {nextDetailedTime && (
+        <View style={dynamicStyles.nearTimeContainer}>
+          <Text style={dynamicStyles.nextTimeText}>
+            <Text style={{fontWeight: 'bold'}}>הזמן הקרוב: </Text>
+            {nextDetailedTime.title} - {nextDetailedTime.timeString}
           </Text>
-          <Text style={dynamicStyles.omerFullText}>{omerData.nextOmer.hebrew}</Text>
         </View>
       )}
 
-      {/* הוספת מידע על פרשת השבוע וההפטרה */}
+      {/* הצגת מידע על פרשת השבוע וההפטרה */}
       {parashaData && (
         <View style={dynamicStyles.parashaContainer}>
           <Text style={dynamicStyles.parashaTitle}>פרשת השבוע</Text>
@@ -626,6 +857,15 @@ const Zmanim: React.FC<ZmanimProps> = ({displayLimit, showHeader = true}) => {
         </View>
       )}
 
+      {/* הצגת מידע ספירת העומר */}
+      {omerData?.todayOmer && (
+        <View style={dynamicStyles.omerContainer}>
+          <Text style={dynamicStyles.omerTitle}>ספירת העומר</Text>
+          <Text style={dynamicStyles.omerText}>{omerData.todayOmer.hebrew}</Text>
+          <Text style={dynamicStyles.omerFullText}>{omerData.todayOmer.fullOmerText}</Text>
+        </View>
+      )}
+
       {holidayEvents.length > 0 && (
         <View style={dynamicStyles.eventsContainer}>
           {holidayEvents.map((event, index) => (
@@ -642,109 +882,23 @@ const Zmanim: React.FC<ZmanimProps> = ({displayLimit, showHeader = true}) => {
         </View>
       )}
 
-      {/* הצגת הזמן הבא מהזמנים המפורטים */}
-      {nextDetailedTime && (
-        <View style={dynamicStyles.nextTimeContainer}>
-          <Text style={dynamicStyles.nextTimeLabel}>הזמן הקרוב:</Text>
-          <Text style={dynamicStyles.nextTimeText}>
-            {nextDetailedTime.title} - {nextDetailedTime.timeString}
-          </Text>
+      <ScrollView style={{maxHeight: 400}}>
+        {/* לוח הזמנים החדש */}
+        <View style={dynamicStyles.timetableContainer}>
+          <View style={dynamicStyles.timetableHeader}>
+            <Text style={dynamicStyles.timetableHeaderText}>לוח זמני היום</Text>
+          </View>
+
+          {/* זמני בוקר */}
+          {renderTimeCategory('בוקר', categorizedTimes.morning, '🌅')}
+
+          {/* זמני צהריים */}
+          {renderTimeCategory('צהריים', categorizedTimes.noon, '☀️')}
+
+          {/* זמני ערב */}
+          {renderTimeCategory('ערב', categorizedTimes.evening, '🌙')}
         </View>
-      )}
-
-      {/* אם אין זמן קרוב מהזמנים המפורטים אבל יש מהזמנים הרגילים */}
-      {!nextDetailedTime && nextTime && (
-        <View style={dynamicStyles.nextTimeContainer}>
-          <Text style={dynamicStyles.nextTimeLabel}>הזמן הקרוב:</Text>
-          <Text style={dynamicStyles.nextTimeText}>
-            {nextTime.name} -{' '}
-            {formatTimeForDisplay(nextTime.parsedTime ? new Date(nextTime.parsedTime) : null)}
-          </Text>
-        </View>
-      )}
-
-      {/* הצגת הזמנים המפורטים מה-API החדש */}
-      {detailedZmanimData?.items && detailedZmanimData.items.length > 0 && (
-        <View style={dynamicStyles.sectionContainer}>
-          <Text style={dynamicStyles.sectionHeader}>זמני היום המפורטים</Text>
-          <ScrollView style={dynamicStyles.zmanimList} horizontal={false}>
-            {displayDetailedZmanim.map((item, index) => {
-              const isPast = item.time && item.time < currentTime;
-              const isNext = nextDetailedTime?.title === item.title;
-
-              return (
-                <View
-                  key={index}
-                  style={[
-                    dynamicStyles.zmanimRow,
-                    isPast && dynamicStyles.pastTime,
-                    isNext && dynamicStyles.nextTime,
-                  ]}>
-                  <Text
-                    style={[
-                      dynamicStyles.zmanimName,
-                      isPast && dynamicStyles.pastTimeText,
-                      isNext && dynamicStyles.highlightedText,
-                    ]}>
-                    {item.title}
-                  </Text>
-                  <Text
-                    style={[
-                      dynamicStyles.zmanimTime,
-                      isPast && dynamicStyles.pastTimeText,
-                      isNext && dynamicStyles.highlightedText,
-                    ]}>
-                    {item.timeString}
-                  </Text>
-                </View>
-              );
-            })}
-          </ScrollView>
-        </View>
-      )}
-
-      {/* הצגת הזמנים הרגילים מה-API הקיים */}
-      {zmanimData?.zmanim && zmanimData.zmanim.length > 0 && (
-        <ScrollView style={dynamicStyles.zmanimList} horizontal={false}>
-          {displayZmanim.map((item, index) => {
-            // Convert ISO string to Date for comparison
-            const isPast = item.parsedTime && new Date(item.parsedTime) < currentTime;
-            const isNext = nextTime?.name === item.name;
-
-            // Use formatted time
-            const displayTime = formatTimeForDisplay(
-              item.parsedTime ? new Date(item.parsedTime) : null,
-            );
-
-            return (
-              <View
-                key={index}
-                style={[
-                  dynamicStyles.zmanimRow,
-                  isPast && dynamicStyles.pastTime,
-                  isNext && dynamicStyles.nextTime,
-                ]}>
-                <Text
-                  style={[
-                    dynamicStyles.zmanimName,
-                    isPast && dynamicStyles.pastTimeText,
-                    isNext && dynamicStyles.highlightedText,
-                  ]}>
-                  {item.name}
-                </Text>
-                <Text
-                  style={[
-                    dynamicStyles.zmanimTime,
-                    isPast && dynamicStyles.pastTimeText,
-                    isNext && dynamicStyles.highlightedText,
-                  ]}>
-                  {displayTime}
-                </Text>
-              </View>
-            );
-          })}
-        </ScrollView>
-      )}
+      </ScrollView>
 
       {/* כפתור רענון */}
       <TouchableOpacity

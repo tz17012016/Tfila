@@ -17,6 +17,19 @@ interface TfilaData {
   tfilaTimeData?: TfilaTime[];
 }
 
+// פונקציית עזר להצגה בטוחה של נתונים
+const safeDisplay = (value: any): string => {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'object') {
+    try {
+      return JSON.stringify(value);
+    } catch (e) {
+      return String(value);
+    }
+  }
+  return String(value);
+};
+
 const TfilaTimes: React.FC = () => {
   const {colors} = useTheme();
   const {data: liveData, isLoading, error, isSuccess} = useGetDbQuery(undefined);
@@ -55,8 +68,8 @@ const TfilaTimes: React.FC = () => {
     },
   });
 
-  // Explicitly formatted the error prop
-  const formattedError = error ? (typeof error === 'string' ? error : JSON.stringify(error)) : null;
+  // Explicitly formatted the error prop to prevent [object Object]
+  const formattedError = error ? (typeof error === 'string' ? error : safeDisplay(error)) : null;
 
   // הקוד של ה-SectionStatus
   const sectionStatusContent = (

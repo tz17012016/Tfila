@@ -32,16 +32,34 @@ const App: React.FC = () => {
   // עבור Android 12+ יש להתחיל את הבדיקות רק אחרי שה-splash screen הוסר
   useEffect(() => {
     const init = async (): Promise<void> => {
+      console.log('=== אתחול האפליקציה ===');
+      console.log(`פלטפורמה: ${Platform.OS} ${Platform.Version}`);
+      console.log(`מצב אפליקציה נוכחי: ${AppState.currentState}`);
+
       try {
         // בדיקת חיבור ראשונית
-        await Connection.isOnline();
+        const isOnline = await Connection.isOnline();
+        console.log(`🌐 מצב חיבור לאינטרנט: ${isOnline ? 'מחובר' : 'לא מחובר'}`);
+
+        // בדיקת זמן חיבור אחרון
+        const lastOnlineTime = await Connection.lastOnline();
+        if (lastOnlineTime) {
+          console.log(`⏱️ זמן חיבור אחרון: ${lastOnlineTime.toLocaleString()}`);
+        } else {
+          console.log('⏱️ לא נמצא מידע על חיבור קודם');
+        }
+
+        // בדיקה אם המטמון ישן
+        const isStale = await Connection.isStale();
+        console.log(`📦 מצב מטמון: ${isStale ? 'ישן (יותר משעה)' : 'עדכני'}`);
       } catch (error) {
-        console.warn('Failed initial connection check:', error);
+        console.warn('❌ שגיאה בבדיקת חיבור ראשונית:', error);
       }
 
       // לחכות מעט לטעינת האפליקציה לפני הצגה
       setTimeout(() => {
         setAppReady(true);
+        console.log('✅ האפליקציה מוכנה להצגה');
       }, 500);
     };
 
@@ -52,15 +70,21 @@ const App: React.FC = () => {
   useEffect(() => {
     if (appReady) {
       RNBootSplash.hide({fade: true});
+      console.log('🚀 מסך טעינה הוסר, האפליקציה מוצגת');
     }
   }, [appReady]);
 
   // ניהול מאזין למצב האפליקציה
   const handleAppStateChange = useCallback(
     (nextAppState: AppStateStatus): void => {
+      console.log(`📱 שינוי מצב אפליקציה: ${appState} -> ${nextAppState}`);
+
       if (appState.match(/inactive|background/) && nextAppState === 'active') {
         // האפליקציה חזרה לפעילות, נעדכן את מצב החיבור
-        Connection.isOnline().catch(err => console.warn('Connection check failed:', err));
+        console.log('🔄 האפליקציה חזרה לפעילות, בודק מצב חיבור...');
+        Connection.isOnline()
+          .then(isOnline => console.log(`🌐 מצב חיבור עדכני: ${isOnline ? 'מחובר' : 'לא מחובר'}`))
+          .catch(err => console.warn('❌ שגיאה בבדיקת חיבור:', err));
       }
 
       setAppState(nextAppState);
@@ -70,9 +94,11 @@ const App: React.FC = () => {
 
   // הוספת מאזין למצב האפליקציה
   useEffect(() => {
+    console.log('🔔 רישום מאזין למצב האפליקציה');
     const subscription = AppState.addEventListener('change', handleAppStateChange);
 
     return () => {
+      console.log('♻️ ניקוי מאזין למצב האפליקציה');
       subscription.remove();
       // לנקות את כל המאזינים בעת סגירת האפליקציה
       Connection.unsubscribeAll();

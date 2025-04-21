@@ -17,6 +17,7 @@ export class HebcalApiService {
 
   constructor(geoId?: number) {
     this.currentGeoId = geoId || this.defaultGeoId;
+    console.log(`HebcalApiService נוצר עם מזהה מיקום: ${this.currentGeoId}, שפה: ${this.language}`);
   }
 
   /**
@@ -24,6 +25,7 @@ export class HebcalApiService {
    * @param geoId - Hebcal geonameid
    */
   setLocation(geoId: number): void {
+    console.log(`שינוי מיקום מ-${this.currentGeoId} ל-${geoId}`);
     this.currentGeoId = geoId;
     // Invalidate cache when location changes
     this.clearCache();
@@ -35,6 +37,7 @@ export class HebcalApiService {
    */
   setLanguage(lang: string): void {
     if (['he', 'en'].includes(lang)) {
+      console.log(`שינוי שפה מ-${this.language} ל-${lang}`);
       this.language = lang;
       // Invalidate cache when language changes
       this.clearCache();
@@ -48,38 +51,58 @@ export class HebcalApiService {
    */
   async getEvents(forceRefresh = false): Promise<any> {
     try {
+      console.group('🗓️ קבלת אירועי לוח שנה עברי');
+      console.log(`מצב: ${forceRefresh ? 'מאלץ רענון מהשרת' : 'בודק מטמון תחילה'}`);
+
       // Check cache first unless forced refresh
       if (!forceRefresh) {
         const cachedData = await this.getCachedData();
         if (cachedData) {
-          console.log('Using cached Hebcal data');
+          console.log('✅ נמצא מידע במטמון תקף');
+          this.logDataSummary(cachedData, 'מטמון');
+          console.groupEnd();
           return cachedData;
         }
       }
 
       // Fetch from API
       const url = this.buildApiUrl();
-      console.log(`Fetching Hebcal data from: ${url}`);
+      console.log(`🔄 מתחבר ל-API בכתובת: ${url}`);
 
+      const startTime = Date.now();
       const response = await fetch(url);
+      const endTime = Date.now();
+
+      console.log(`⏱️ זמן תגובת שרת: ${endTime - startTime}ms`);
+      console.log(`קוד תשובה: ${response.status} ${response.statusText}`);
+
       if (!response.ok) {
         throw new Error(`Hebcal API error: ${response.status}`);
       }
 
       const data = await response.json();
+      console.log(`📦 נתונים התקבלו בהצלחה מהשרת`);
+
+      // Log data summary
+      this.logDataSummary(data, 'שרת');
 
       // Cache the response
       await this.cacheData(data);
 
+      console.groupEnd();
       return data;
     } catch (error) {
-      console.error('Error fetching Hebcal events:', error);
+      console.error('❌ שגיאה בקבלת אירועים:', error);
+
       // Return cached data as fallback if available
       const cachedData = await this.getCachedData(true);
       if (cachedData) {
-        console.log('Using cached data as fallback after error');
+        console.log('⚠️ משתמש בנתונים מהמטמון כגיבוי לאחר שגיאה');
+        this.logDataSummary(cachedData, 'מטמון (גיבוי)');
+        console.groupEnd();
         return cachedData;
       }
+      console.groupEnd();
       throw error;
     }
   }
@@ -89,11 +112,23 @@ export class HebcalApiService {
    * @returns Promise with today's events
    */
   async getTodayEvents(): Promise<any[]> {
+    console.group('🔍 קבלת אירועים להיום');
     const data = await this.getEvents();
     const today = new Date();
     const todayStr = today.toISOString().split('T')[0]; // YYYY-MM-DD format
 
-    return this.filterEventsByDate(data.items, todayStr);
+    const events = this.filterEventsByDate(data.items, todayStr);
+    console.log(`נמצאו ${events.length} אירועים להיום (${todayStr})`);
+
+    if (events.length > 0) {
+      console.log(
+        'רשימת אירועים:',
+        events.map(e => e.title || e.hebrew || e.description).join(', '),
+      );
+    }
+
+    console.groupEnd();
+    return events;
   }
 
   /**
@@ -102,10 +137,22 @@ export class HebcalApiService {
    * @returns Promise with events for the specified date
    */
   async getEventsByDate(date: Date): Promise<any[]> {
-    const data = await this.getEvents();
     const dateStr = date.toISOString().split('T')[0]; // YYYY-MM-DD format
+    console.group(`🔍 קבלת אירועים לתאריך ${dateStr}`);
 
-    return this.filterEventsByDate(data.items, dateStr);
+    const data = await this.getEvents();
+    const events = this.filterEventsByDate(data.items, dateStr);
+
+    console.log(`נמצאו ${events.length} אירועים לתאריך ${dateStr}`);
+    if (events.length > 0) {
+      console.log(
+        'רשימת אירועים:',
+        events.map(e => e.title || e.hebrew || e.description).join(', '),
+      );
+    }
+
+    console.groupEnd();
+    return events;
   }
 
   /**
@@ -113,14 +160,39 @@ export class HebcalApiService {
    * @returns Promise with upcoming events
    */
   async getUpcomingEvents(): Promise<any[]> {
+    console.group('🔍 קבלת אירועים עתידיים');
+
     const data = await this.getEvents();
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    return data.items.filter(item => {
+    const events = data.items.filter(item => {
       const eventDate = new Date(item.date);
       return eventDate >= today;
     });
+
+    console.log(`נמצאו ${events.length} אירועים עתידיים`);
+
+    // Log first 5 upcoming events
+    if (events.length > 0) {
+      const firstFiveEvents = events.slice(0, 5);
+      console.log('חמשת האירועים הקרובים:');
+      firstFiveEvents.forEach(event => {
+        const eventDate = new Date(event.date);
+        console.log(
+          `- ${eventDate.toLocaleDateString('he-IL')}: ${
+            event.title || event.hebrew || event.description
+          }`,
+        );
+      });
+
+      if (events.length > 5) {
+        console.log(`...ועוד ${events.length - 5} אירועים`);
+      }
+    }
+
+    console.groupEnd();
+    return events;
   }
 
   /**
@@ -128,11 +200,19 @@ export class HebcalApiService {
    * @returns Promise with this week's parasha info or null if not found
    */
   async getWeeklyParasha(): Promise<any | null> {
+    console.group('🔍 קבלת פרשת השבוע');
+
     const data = await this.getEvents();
     const today = new Date();
     const nextShabbat = this.getNextShabbat(today);
     const maxDate = new Date(nextShabbat);
     maxDate.setDate(maxDate.getDate() + 1); // Include Shabbat fully
+
+    console.log(
+      `מחפש פרשה בין ${today.toLocaleDateString('he-IL')} לבין ${maxDate.toLocaleDateString(
+        'he-IL',
+      )}`,
+    );
 
     // Get events between today and next Shabbat
     const events = data.items.filter(item => {
@@ -141,9 +221,19 @@ export class HebcalApiService {
     });
 
     // Find parasha event (usually has category "parashat")
-    return events.find(
+    const parasha = events.find(
       event => event.category === 'parashat' || (event.title && event.title.includes('פרשת')),
     );
+
+    if (parasha) {
+      console.log(`🕮 נמצאה פרשת השבוע: ${parasha.title || parasha.hebrew}`);
+      console.log('פרטי הפרשה:', JSON.stringify(parasha, null, 2));
+    } else {
+      console.log('❌ לא נמצאה פרשת שבוע');
+    }
+
+    console.groupEnd();
+    return parasha;
   }
 
   /**
@@ -151,11 +241,14 @@ export class HebcalApiService {
    */
   async clearCache(): Promise<void> {
     try {
+      console.group('🗑️ ניקוי מטמון');
       await AsyncStorage.removeItem(HEBCAL_CACHE_KEY);
       await AsyncStorage.removeItem(HEBCAL_CACHE_DATE_KEY);
-      console.log('Hebcal cache cleared');
+      console.log('✅ מטמון נוקה בהצלחה');
+      console.groupEnd();
     } catch (error) {
-      console.error('Failed to clear Hebcal cache:', error);
+      console.error('❌ שגיאה בניקוי מטמון:', error);
+      console.groupEnd();
     }
   }
 
@@ -228,9 +321,9 @@ export class HebcalApiService {
     try {
       await AsyncStorage.setItem(HEBCAL_CACHE_KEY, JSON.stringify(data));
       await AsyncStorage.setItem(HEBCAL_CACHE_DATE_KEY, new Date().toISOString());
-      console.log('Hebcal data cached successfully');
+      console.log('✅ נתונים נשמרו במטמון בהצלחה');
     } catch (error) {
-      console.error('Failed to cache Hebcal data:', error);
+      console.error('❌ שגיאה בשמירת נתונים במטמון:', error);
     }
   }
 
@@ -246,6 +339,7 @@ export class HebcalApiService {
       const cacheDateStr = await AsyncStorage.getItem(HEBCAL_CACHE_DATE_KEY);
 
       if (!cachedDataStr || !cacheDateStr) {
+        console.log('לא נמצא מטמון');
         return null;
       }
 
@@ -255,18 +349,78 @@ export class HebcalApiService {
         const now = new Date();
         const diffMs = now.getTime() - cacheDate.getTime();
         const diffDays = diffMs / (1000 * 60 * 60 * 24);
+        const diffHours = diffMs / (1000 * 60 * 60);
+
+        console.log(`מטמון נוצר לפני: ${Math.floor(diffHours)} שעות (${diffDays.toFixed(2)} ימים)`);
+        console.log(`תוקף מטמון: ${CACHE_EXPIRY_DAYS} ימים`);
 
         if (diffDays > CACHE_EXPIRY_DAYS) {
-          console.log('Hebcal cache expired');
+          console.log('⚠️ המטמון פג תוקף');
           return null;
         }
       }
 
       return JSON.parse(cachedDataStr);
     } catch (error) {
-      console.error('Error retrieving Hebcal cached data:', error);
+      console.error('❌ שגיאה באחזור נתונים מהמטמון:', error);
       return null;
     }
+  }
+
+  /**
+   * Log a summary of the data received
+   * @param data - Data to summarize
+   * @param source - Source of the data (cache or API)
+   */
+  private logDataSummary(data: any, source: string): void {
+    if (!data || !data.items) {
+      console.log(`❌ אין נתונים תקפים מ${source}`);
+      return;
+    }
+
+    const totalEvents = data.items.length;
+    const categories = new Set();
+    const monthCounts: Record<string, number> = {};
+    const typeCounts: Record<string, number> = {};
+
+    // הוספת תאריך העדכון האחרון
+    const lastUpdateDate = data.date || 'לא זמין';
+
+    // Count events by category, month, and type
+    data.items.forEach((item: any) => {
+      if (item.category) {
+        categories.add(item.category);
+        typeCounts[item.category] = (typeCounts[item.category] || 0) + 1;
+      }
+
+      if (item.date) {
+        const month = new Date(item.date).getMonth() + 1;
+        monthCounts[month] = (monthCounts[month] || 0) + 1;
+      }
+    });
+
+    console.group(`📊 סיכום נתונים (מקור: ${source})`);
+    console.log(`סך הכל אירועים: ${totalEvents}`);
+    console.log(`תאריך העדכון האחרון: ${lastUpdateDate}`);
+    console.log(`קטגוריות: ${Array.from(categories).join(', ')}`);
+
+    // Log distribution by type
+    console.log('התפלגות לפי סוג:');
+    Object.entries(typeCounts)
+      .sort((a, b) => b[1] - a[1]) // Sort by count in descending order
+      .forEach(([type, count]) => {
+        console.log(`  - ${type}: ${count} (${((count / totalEvents) * 100).toFixed(1)}%)`);
+      });
+
+    // Log distribution by month
+    console.log('התפלגות לפי חודש:');
+    for (let i = 1; i <= 12; i++) {
+      if (monthCounts[i]) {
+        console.log(`  - חודש ${i}: ${monthCounts[i]} אירועים`);
+      }
+    }
+
+    console.groupEnd();
   }
 }
 

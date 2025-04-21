@@ -1,4 +1,5 @@
 import {FLUSH, PAUSE, PERSIST, PURGE, REGISTER, REHYDRATE} from 'redux-persist';
+import {apiLogger} from '../../utilities/apiLogger';
 import {connectionApi} from '../redux/api/connectionApi';
 import {dbApi} from '../redux/api/dbApi';
 import {halchYomitApi} from '../redux/api/halchYomitApi';
@@ -11,8 +12,15 @@ const middleware = (getDefaultMiddleware: any) =>
   getDefaultMiddleware({
     serializableCheck: {
       ignoredActions: [FLUSH, REHYDRATE, PAUSE, PERSIST, PURGE, REGISTER],
+      // Increasing the thresholds to avoid performance warnings
+      warnAfter: 128,
+    },
+    immutableCheck: {
+      // Increasing the threshold for immutable check as well
+      warnAfter: 128,
     },
   }).concat(
+    apiLogger,
     dbApi.middleware,
     connectionApi.middleware,
     halchYomitApi.middleware,
